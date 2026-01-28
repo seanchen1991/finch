@@ -31,6 +31,9 @@ export interface Channel {
   /** Send a message */
   send(message: OutgoingMessage): Promise<void>;
 
+  /** Show typing indicator in a channel */
+  sendTyping?(channelId: string): Promise<void>;
+
   /** Register message handler */
   onMessage(handler: (message: IncomingMessage) => Promise<void>): void;
 }

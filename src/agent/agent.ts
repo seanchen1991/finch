@@ -2,7 +2,7 @@
  * Core agent logic - orchestrates LLM, tools, and skills
  */
 
-import type { LLM, ChatMessage } from "../llm/llm.js";
+import type { LLM, ChatMessage, StreamCallback } from "../llm/llm.js";
 import type { Tool } from "../tools/types.js";
 import type { Memory, UserPreferences, ConversationEntry } from "../memory/memory.js";
 import { zodToJsonSchema } from "../tools/schema.js";
@@ -16,8 +16,15 @@ export interface AgentConfig {
   maxHistoryLength?: number;
 }
 
+export interface StreamOptions {
+  /** Called for each text chunk (excludes tool call markup) */
+  onChunk?: StreamCallback;
+  /** Called when a tool is being executed */
+  onToolCall?: (toolName: string) => void;
+}
+
 export interface Agent {
-  chat(userMessage: string, userId: string): Promise<string>;
+  chat(userMessage: string, userId: string, options?: StreamOptions): Promise<string>;
   addTool(tool: Tool): void;
   clearHistory(userId: string): Promise<void>;
   loadHistory(): Promise<void>;
@@ -98,7 +105,9 @@ export function createAgent(config: AgentConfig): Agent {
       }
     },
 
-    async chat(userMessage: string, userId: string): Promise<string> {
+    async chat(userMessage: string, userId: string, options?: StreamOptions): Promise<string> {
+      const { onChunk, onToolCall } = options ?? {};
+
       // Load user preferences from memory
       const prefs = await memory.getUserPreferences(userId);
 
@@ -142,10 +151,38 @@ export function createAgent(config: AgentConfig): Agent {
 
       // Tool calling loop
       let iterations = 0;
+      let isFirstResponse = true;
+
       while (iterations < maxToolCalls) {
         iterations++;
 
-        const response = await llm.chat(messages);
+        let response: string;
+
+        // Use streaming for the first response if callback provided and we might not need tools
+        // For subsequent responses (after tool execution), also use streaming
+        if (onChunk) {
+          let buffer = "";
+          let toolCallDetected = false;
+
+          response = await llm.chatStream(messages, (chunk) => {
+            buffer += chunk;
+            // Check if we're entering a tool call
+            if (buffer.includes("<tool_call>") && !toolCallDetected) {
+              toolCallDetected = true;
+              // Stream everything before the tool call tag
+              const beforeToolCall = buffer.split("<tool_call>")[0];
+              if (beforeToolCall && isFirstResponse) {
+                onChunk(beforeToolCall);
+              }
+            }
+            // Only stream if we haven't detected a tool call
+            if (!toolCallDetected && isFirstResponse) {
+              onChunk(chunk);
+            }
+          });
+        } else {
+          response = await llm.chat(messages);
+        }
 
         // Try to parse tool calls from response
         const toolCalls = parseToolCalls(response);
@@ -157,12 +194,19 @@ export function createAgent(config: AgentConfig): Agent {
           return cleaned;
         }
 
+        isFirstResponse = false;
+
         // Execute tool calls
         const results: string[] = [];
         const availableToolNames = Array.from(toolRegistry.keys());
 
         for (const call of toolCalls) {
           const tool = toolRegistry.get(call.name);
+
+          // Notify about tool call
+          if (onToolCall) {
+            onToolCall(call.name);
+          }
 
           // Handle unknown tool
           if (!tool) {

@@ -16,9 +16,6 @@ _(Items currently being worked on)_
 - [ ] **Gmail integration** - Google Pub/Sub + Gmail API for push-based email
 - [ ] **Outlook integration** - Microsoft Graph API webhooks
 
-### Agent & Tools
-- [ ] **Streaming responses** - Show partial responses as they're generated for better UX
-
 ### Skills
 - [ ] **Skill loader** - Load skills from `~/.finch/skills/`
 - [ ] **Learned skills** - Allow agent to define and save new tools
@@ -40,3 +37,4 @@ _(Items currently being worked on)_
 - [x] Per-user conversation context across channels
 - [x] Shell tool for command execution
 - [x] Structured tool error handling (unknown tools, validation errors, timeouts)
+- [x] Streaming responses with typing indicators

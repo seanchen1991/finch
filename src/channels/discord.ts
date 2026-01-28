@@ -92,6 +92,19 @@ export function createDiscordChannel(config: DiscordConfig): Channel {
       console.log("Discord channel stopped");
     },
 
+    async sendTyping(channelId: string) {
+      if (!client) return;
+
+      try {
+        const channel = await client.channels.fetch(channelId);
+        if (channel?.isTextBased()) {
+          await (channel as TextChannel | DMChannel).sendTyping();
+        }
+      } catch {
+        // Ignore typing errors
+      }
+    },
+
     async send(message: OutgoingMessage) {
       if (!client) {
         throw new Error("Discord client not connected");

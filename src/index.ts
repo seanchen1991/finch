@@ -57,11 +57,27 @@ async function main() {
     await agent.loadHistory();
 
     console.log("User:", cliPrompt);
-    console.log("Assistant:", "");
+    process.stdout.write("Assistant: ");
 
-    const response = await agent.chat(cliPrompt, "cli-user");
+    let hasStreamed = false;
+    const response = await agent.chat(cliPrompt, "cli-user", {
+      onChunk: (chunk) => {
+        hasStreamed = true;
+        process.stdout.write(chunk);
+      },
+      onToolCall: (toolName) => {
+        if (!hasStreamed) {
+          process.stdout.write(`[using ${toolName}...] `);
+        }
+      },
+    });
 
-    console.log(response);
+    // If we didn't stream (e.g., tool calls happened), print the full response
+    if (!hasStreamed) {
+      console.log(response);
+    } else {
+      console.log(); // Final newline
+    }
     await memory.dispose();
     await llm.dispose();
     return;
@@ -95,13 +111,32 @@ async function main() {
       console.log(`[Discord] ${msg.metadata?.["username"]}: ${msg.content}`);
 
       try {
-        const response = await agent.chat(msg.content, msg.userId);
-        await discord.send({
-          channelId: msg.channelId,
-          userId: msg.userId,
-          content: response,
-          replyTo: msg.id,
-        });
+        // Show typing indicator while processing
+        if (discord.sendTyping) {
+          await discord.sendTyping(msg.channelId);
+        }
+
+        // Keep typing indicator alive during long operations (refreshes every 8s)
+        const typingInterval = setInterval(() => {
+          discord.sendTyping?.(msg.channelId).catch(() => {});
+        }, 8000);
+
+        try {
+          const response = await agent.chat(msg.content, msg.userId, {
+            onToolCall: (toolName) => {
+              console.log(`[Discord] Using tool: ${toolName}`);
+            },
+          });
+
+          await discord.send({
+            channelId: msg.channelId,
+            userId: msg.userId,
+            content: response,
+            replyTo: msg.id,
+          });
+        } finally {
+          clearInterval(typingInterval);
+        }
       } catch (err) {
         console.error("Error handling message:", err);
         await discord.send({
