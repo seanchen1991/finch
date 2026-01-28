@@ -81,18 +81,25 @@ export function createAgent(config: AgentConfig): Agent {
         { role: "user", content: userMessage },
       ];
 
-      // Add user message to history (both cache and DB)
+      // Prepare cache reference (don't save yet - wait for successful response)
       if (!historyCache.has(userId)) {
         historyCache.set(userId, []);
       }
       const cached = historyCache.get(userId)!;
-      cached.push({ role: "user", content: userMessage, timestamp: Date.now() });
-      await memory.addToConversationHistory(userId, "user", userMessage);
 
-      // Trim cache if needed
-      while (cached.length > maxHistoryLength * 2) {
-        cached.shift();
-      }
+      // Helper to save both user and assistant messages after successful response
+      const saveToHistory = async (assistantResponse: string) => {
+        const now = Date.now();
+        cached.push({ role: "user", content: userMessage, timestamp: now });
+        cached.push({ role: "assistant", content: assistantResponse, timestamp: now });
+        await memory.addToConversationHistory(userId, "user", userMessage);
+        await memory.addToConversationHistory(userId, "assistant", assistantResponse);
+
+        // Trim cache if needed
+        while (cached.length > maxHistoryLength * 2) {
+          cached.shift();
+        }
+      };
 
       // Tool calling loop
       let iterations = 0;
@@ -107,8 +114,7 @@ export function createAgent(config: AgentConfig): Agent {
         if (toolCalls.length === 0) {
           // No tool calls - save to history and return
           const cleaned = cleanResponse(response);
-          cached.push({ role: "assistant", content: cleaned, timestamp: Date.now() });
-          await memory.addToConversationHistory(userId, "assistant", cleaned);
+          await saveToHistory(cleaned);
           return cleaned;
         }
 
@@ -145,8 +151,7 @@ export function createAgent(config: AgentConfig): Agent {
       // Max iterations reached
       const finalResponse = await llm.chat(messages);
       const cleaned = cleanResponse(finalResponse);
-      cached.push({ role: "assistant", content: cleaned, timestamp: Date.now() });
-      await memory.addToConversationHistory(userId, "assistant", cleaned);
+      await saveToHistory(cleaned);
       return cleaned;
     },
 

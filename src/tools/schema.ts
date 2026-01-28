@@ -40,8 +40,8 @@ export function zodToJsonSchema(schema: z.ZodType): JsonSchema {
       const fieldDef = fieldSchema._def as ZodDef;
       properties[key] = zodToJsonSchema(fieldSchema);
 
-      // Check if field is optional
-      if (fieldDef.typeName !== "ZodOptional") {
+      // Check if field is optional (ZodOptional or ZodDefault)
+      if (fieldDef.typeName !== "ZodOptional" && fieldDef.typeName !== "ZodDefault") {
         required.push(key);
       }
     }

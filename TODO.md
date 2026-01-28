@@ -10,6 +10,8 @@ _(Items currently being worked on)_
 
 - [ ] **Lazy load conversation history** - Load a user's history on-demand when they send their first message of the session, instead of loading all users at startup. This will improve startup time as the user base grows. _(see `src/agent/agent.ts:44`)_
 
+- [ ] **Compact conversation history** - Currently the in-memory cache is trimmed to `maxHistoryLength`, but the SQLite database grows unbounded. Add compaction to delete old entries (e.g., trim on write, keeping last N entries per user).
+
 ### Channels
 
 - [ ] **WhatsApp integration** - Wire up Baileys for WhatsApp support
@@ -17,8 +19,6 @@ _(Items currently being worked on)_
 - [ ] **Outlook integration** - Microsoft Graph API webhooks
 
 ### Agent & Tools
-
-- [ ] **Shell tool** - Enable the existing shell tool (`src/tools/shell.ts`) for command execution
 - [ ] **Tool calling improvements** - Better error handling, streaming responses
 
 ### Skills
@@ -39,3 +39,4 @@ _(Items currently being worked on)_
 - [x] Tool calling loop
 - [x] Persistent conversation history (SQLite)
 - [x] Per-user conversation context across channels
+- [x] Shell tool for command execution

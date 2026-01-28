@@ -13,6 +13,7 @@ import { createMemory } from "./memory/memory.js";
 import { createAgent } from "./agent/agent.js";
 import { createDiscordChannel } from "./channels/discord.js";
 import { filesystemTools } from "./tools/filesystem.js";
+import { shellTools } from "./tools/shell.js";
 import type { Channel } from "./channels/types.js";
 
 function expandPath(path: string): string {
@@ -47,7 +48,7 @@ async function main() {
 
     const agent = createAgent({
       llm,
-      tools: [...filesystemTools],
+      tools: [...filesystemTools, ...shellTools],
       memory,
       systemPrompt: "You are Finch, a helpful AI assistant running on the user's local machine. Be concise and friendly. You have access to the filesystem - use it when the user asks about files.",
     });
@@ -73,7 +74,7 @@ async function main() {
 
   const agent = createAgent({
     llm,
-    tools: [...filesystemTools],
+    tools: [...filesystemTools, ...shellTools],
     memory,
     systemPrompt: "You are Finch, a helpful AI assistant running on the user's local machine. Be concise and friendly. You have access to the filesystem - use it when the user asks about files.",
   });
