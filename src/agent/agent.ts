@@ -28,6 +28,45 @@ interface ToolCall {
   arguments: Record<string, unknown>;
 }
 
+/** Categorized tool execution errors for better feedback to the model */
+enum ToolErrorType {
+  UnknownTool = "unknown_tool",
+  InvalidArguments = "invalid_arguments",
+  ExecutionFailed = "execution_failed",
+  Timeout = "timeout",
+}
+
+interface ToolExecutionError {
+  type: ToolErrorType;
+  toolName: string;
+  message: string;
+  details?: string;
+}
+
+function formatToolError(error: ToolExecutionError, availableTools?: string[]): string {
+  switch (error.type) {
+    case ToolErrorType.UnknownTool:
+      const toolList = availableTools?.length
+        ? `Available tools: ${availableTools.join(", ")}`
+        : "";
+      return `Error: Unknown tool "${error.toolName}". ${toolList}`;
+
+    case ToolErrorType.InvalidArguments:
+      return `Error: Invalid arguments for "${error.toolName}": ${error.message}${
+        error.details ? `\nDetails: ${error.details}` : ""
+      }`;
+
+    case ToolErrorType.ExecutionFailed:
+      return `Error: Tool "${error.toolName}" failed: ${error.message}`;
+
+    case ToolErrorType.Timeout:
+      return `Error: Tool "${error.toolName}" timed out after ${error.details ?? "unknown"} ms`;
+
+    default:
+      return `Error: ${error.message}`;
+  }
+}
+
 /**
  * Create an agent instance
  */
@@ -120,11 +159,19 @@ export function createAgent(config: AgentConfig): Agent {
 
         // Execute tool calls
         const results: string[] = [];
-        for (const call of toolCalls) {
+        const availableToolNames = Array.from(toolRegistry.keys());
 
+        for (const call of toolCalls) {
           const tool = toolRegistry.get(call.name);
+
+          // Handle unknown tool
           if (!tool) {
-            results.push(`Error: Unknown tool "${call.name}"`);
+            const error: ToolExecutionError = {
+              type: ToolErrorType.UnknownTool,
+              toolName: call.name,
+              message: `Tool "${call.name}" does not exist`,
+            };
+            results.push(formatToolError(error, availableToolNames));
             continue;
           }
 
@@ -133,18 +180,62 @@ export function createAgent(config: AgentConfig): Agent {
             if (result.success) {
               results.push(`[${call.name}] ${result.output}`);
             } else {
-              results.push(`[${call.name}] Error: ${result.error}`);
+              const error: ToolExecutionError = {
+                type: ToolErrorType.ExecutionFailed,
+                toolName: call.name,
+                message: result.error ?? "Unknown error",
+              };
+              results.push(formatToolError(error));
             }
           } catch (err) {
-            results.push(`[${call.name}] Error: ${String(err)}`);
+            // Check for Zod validation errors
+            if (err instanceof Error && err.name === "ZodError") {
+              const zodError = err as Error & { issues?: Array<{ path: string[]; message: string }> };
+              const details = zodError.issues
+                ?.map((issue) => `${issue.path.join(".")}: ${issue.message}`)
+                .join("; ");
+              const error: ToolExecutionError = {
+                type: ToolErrorType.InvalidArguments,
+                toolName: call.name,
+                message: "Validation failed",
+                details,
+              };
+              results.push(formatToolError(error));
+            } else if (err instanceof Error && err.message?.includes("timed out")) {
+              const error: ToolExecutionError = {
+                type: ToolErrorType.Timeout,
+                toolName: call.name,
+                message: "Command timed out",
+                details: "30000", // Default timeout
+              };
+              results.push(formatToolError(error));
+            } else {
+              const error: ToolExecutionError = {
+                type: ToolErrorType.ExecutionFailed,
+                toolName: call.name,
+                message: err instanceof Error ? err.message : String(err),
+              };
+              results.push(formatToolError(error));
+            }
           }
         }
 
+        // Check if any errors occurred
+        const hasErrors = results.some((r) => r.startsWith("Error:"));
+
         // Add assistant response and tool results to history
         messages.push({ role: "assistant", content: response });
+
+        let feedbackMessage = `Tool results:\n${results.join("\n\n")}`;
+        if (hasErrors) {
+          feedbackMessage += "\n\nSome tool calls failed. You may retry with corrected arguments, try a different approach, or explain the issue to the user.";
+        } else {
+          feedbackMessage += "\n\nContinue your response based on these results.";
+        }
+
         messages.push({
           role: "user",
-          content: `Tool results:\n${results.join("\n\n")}\n\nContinue your response based on these results.`,
+          content: feedbackMessage,
         });
       }
 
