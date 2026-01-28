@@ -1,4 +1,4 @@
-# Finch
+# Finch 🐦
 
 A lightweight local-first AI assistant that runs on Mac Mini with Qwen models via llama.cpp. Inspired by Molt Bot 🦞
 
