@@ -4,7 +4,7 @@
 
 import type { LLM, ChatMessage } from "../llm/llm.js";
 import type { Tool } from "../tools/types.js";
-import type { Memory, UserPreferences } from "../memory/memory.js";
+import type { Memory, UserPreferences, ConversationEntry } from "../memory/memory.js";
 import { zodToJsonSchema } from "../tools/schema.js";
 
 export interface AgentConfig {
@@ -13,11 +13,14 @@ export interface AgentConfig {
   memory: Memory;
   systemPrompt?: string;
   maxToolCalls?: number;
+  maxHistoryLength?: number;
 }
 
 export interface Agent {
   chat(userMessage: string, userId: string): Promise<string>;
   addTool(tool: Tool): void;
+  clearHistory(userId: string): Promise<void>;
+  loadHistory(): Promise<void>;
 }
 
 interface ToolCall {
@@ -31,21 +34,65 @@ interface ToolCall {
 export function createAgent(config: AgentConfig): Agent {
   const { llm, tools, memory } = config;
   const maxToolCalls = config.maxToolCalls ?? 10;
+  const maxHistoryLength = config.maxHistoryLength ?? 20; // Max conversation turns to keep
   const toolRegistry = new Map(tools.map((t) => [t.name, t]));
 
+  // In-memory cache of conversation history (loaded from DB on startup)
+  const historyCache = new Map<string, ConversationEntry[]>();
+
   return {
+    async loadHistory(): Promise<void> {
+      // TODO: Lazy loading optimization - instead of loading all users upfront,
+      // load a user's history on-demand when they send their first message of the session.
+      // This will improve startup time as the user base grows.
+
+      // Load all users' conversation history from database
+      const userIds = await memory.getAllUserIds();
+      for (const userId of userIds) {
+        const history = await memory.getConversationHistory(userId);
+        // Trim to max length
+        const trimmed = history.slice(-maxHistoryLength * 2);
+        historyCache.set(userId, trimmed);
+      }
+      if (userIds.length > 0) {
+        console.log(`Loaded conversation history for ${userIds.length} user(s)`);
+      }
+    },
+
     async chat(userMessage: string, userId: string): Promise<string> {
       // Load user preferences from memory
       const prefs = await memory.getUserPreferences(userId);
 
-      // Build initial messages
+      // Get conversation history for this user (from cache)
+      const history = historyCache.get(userId) ?? [];
+
+      // Build messages with history
       const messages: ChatMessage[] = [
         {
           role: "system",
           content: buildSystemPrompt(config.systemPrompt, prefs, toolRegistry),
         },
+        // Include conversation history
+        ...history.map((entry) => ({
+          role: entry.role,
+          content: entry.content,
+        })),
+        // Add current user message
         { role: "user", content: userMessage },
       ];
+
+      // Add user message to history (both cache and DB)
+      if (!historyCache.has(userId)) {
+        historyCache.set(userId, []);
+      }
+      const cached = historyCache.get(userId)!;
+      cached.push({ role: "user", content: userMessage, timestamp: Date.now() });
+      await memory.addToConversationHistory(userId, "user", userMessage);
+
+      // Trim cache if needed
+      while (cached.length > maxHistoryLength * 2) {
+        cached.shift();
+      }
 
       // Tool calling loop
       let iterations = 0;
@@ -58,8 +105,11 @@ export function createAgent(config: AgentConfig): Agent {
         const toolCalls = parseToolCalls(response);
 
         if (toolCalls.length === 0) {
-          // No tool calls - return the response
-          return cleanResponse(response);
+          // No tool calls - save to history and return
+          const cleaned = cleanResponse(response);
+          cached.push({ role: "assistant", content: cleaned, timestamp: Date.now() });
+          await memory.addToConversationHistory(userId, "assistant", cleaned);
+          return cleaned;
         }
 
         // Execute tool calls
@@ -94,11 +144,19 @@ export function createAgent(config: AgentConfig): Agent {
 
       // Max iterations reached
       const finalResponse = await llm.chat(messages);
-      return cleanResponse(finalResponse);
+      const cleaned = cleanResponse(finalResponse);
+      cached.push({ role: "assistant", content: cleaned, timestamp: Date.now() });
+      await memory.addToConversationHistory(userId, "assistant", cleaned);
+      return cleaned;
     },
 
     addTool(tool: Tool): void {
       toolRegistry.set(tool.name, tool);
+    },
+
+    async clearHistory(userId: string): Promise<void> {
+      historyCache.delete(userId);
+      await memory.clearConversationHistory(userId);
     },
   };
 }

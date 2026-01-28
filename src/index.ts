@@ -52,6 +52,9 @@ async function main() {
       systemPrompt: "You are Finch, a helpful AI assistant running on the user's local machine. Be concise and friendly. You have access to the filesystem - use it when the user asks about files.",
     });
 
+    // Load conversation history from database
+    await agent.loadHistory();
+
     console.log("User:", cliPrompt);
     console.log("Assistant:", "");
 
@@ -74,6 +77,9 @@ async function main() {
     memory,
     systemPrompt: "You are Finch, a helpful AI assistant running on the user's local machine. Be concise and friendly. You have access to the filesystem - use it when the user asks about files.",
   });
+
+  // Load conversation history from database
+  await agent.loadHistory();
 
   const channels: Channel[] = [];
 
