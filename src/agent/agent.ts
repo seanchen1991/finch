@@ -4,7 +4,7 @@
 
 import type { LLM, ChatMessage } from "../llm/llm.js";
 import type { Tool } from "../tools/types.js";
-import type { Memory } from "../memory/memory.js";
+import type { Memory, UserPreferences } from "../memory/memory.js";
 
 export interface AgentConfig {
   llm: LLM;
@@ -56,7 +56,7 @@ export function createAgent(config: AgentConfig): Agent {
 
 function buildSystemPrompt(
   base: string | undefined,
-  prefs: Record<string, unknown>,
+  prefs: UserPreferences,
   tools: Map<string, Tool>,
 ): string {
   const toolDescriptions = Array.from(tools.values())

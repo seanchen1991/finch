@@ -37,14 +37,23 @@ export const ConfigSchema = z.object({
 export type FinchConfig = z.infer<typeof ConfigSchema>;
 
 /**
- * Load configuration from file or defaults
+ * Load configuration from file or defaults, with env var overrides
  */
 export async function loadConfig(): Promise<FinchConfig> {
   // TODO: Load from ~/.finch/config.json or config.yaml
-  // For now, return defaults with placeholder model path
+  const discordToken = process.env["DISCORD_BOT_TOKEN"];
+  const modelPath = process.env["FINCH_MODEL_PATH"];
+
   return ConfigSchema.parse({
     model: {
-      path: "~/.finch/models/qwen2.5-7b-instruct.gguf",
+      path: modelPath ??
+        "~/.node-llama-cpp/models/hf_Qwen_qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf",
+    },
+    channels: {
+      discord: {
+        enabled: !!discordToken,
+        token: discordToken,
+      },
     },
   });
 }
