@@ -38,10 +38,6 @@ export async function createLLM(config: LLMConfig): Promise<LLM> {
     gpuLayers: config.gpuLayers,
   });
 
-  const context: LlamaContext = await model.createContext({
-    contextSize: config.contextSize ?? 8192,
-  });
-
   // Lazily create embedding context only when needed
   let embeddingContext: LlamaEmbeddingContext | null = null;
 
@@ -54,25 +50,48 @@ export async function createLLM(config: LLMConfig): Promise<LLM> {
 
   return {
     async chat(messages: ChatMessage[]): Promise<string> {
-      // Extract system prompt from messages
-      const systemMessage = messages.find((m) => m.role === "system");
-      const systemPrompt = systemMessage?.content ?? "You are a helpful assistant.";
-
-      // Create a fresh session for each call
-      const session = new LlamaChatSession({
-        contextSequence: context.getSequence(),
-        systemPrompt,
+      // Create a fresh context for each call to avoid sequence exhaustion
+      const context: LlamaContext = await model.createContext({
+        contextSize: config.contextSize ?? 8192,
       });
 
-      // Get the last user message
-      const userMessages = messages.filter((m) => m.role === "user");
-      const lastUserMessage = userMessages[userMessages.length - 1];
-      if (!lastUserMessage) {
-        throw new Error("No user message provided");
-      }
+      try {
+        // Extract system prompt from messages
+        const systemMessage = messages.find((m) => m.role === "system");
+        const systemPrompt = systemMessage?.content ?? "You are a helpful assistant.";
 
-      const response = await session.prompt(lastUserMessage.content);
-      return response;
+        // Create a fresh session
+        const session = new LlamaChatSession({
+          contextSequence: context.getSequence(),
+          systemPrompt,
+        });
+
+        // Build conversation by feeding all non-system messages
+        const conversationMessages = messages.filter((m) => m.role !== "system");
+
+        // Process all messages except the last user message
+        for (let i = 0; i < conversationMessages.length - 1; i += 2) {
+          const userMsg = conversationMessages[i];
+          const assistantMsg = conversationMessages[i + 1];
+
+          if (userMsg?.role === "user" && assistantMsg?.role === "assistant") {
+            // Feed the conversation history
+            await session.prompt(userMsg.content);
+            // The session should have the assistant response in history now
+          }
+        }
+
+        // Get the last user message for the actual response
+        const lastMessage = conversationMessages[conversationMessages.length - 1];
+        if (!lastMessage || lastMessage.role !== "user") {
+          throw new Error("Last message must be from user");
+        }
+
+        const response = await session.prompt(lastMessage.content);
+        return response;
+      } finally {
+        await context.dispose();
+      }
     },
 
     async embed(text: string): Promise<number[]> {
@@ -85,7 +104,6 @@ export async function createLLM(config: LLMConfig): Promise<LLM> {
       if (embeddingContext) {
         await embeddingContext.dispose();
       }
-      await context.dispose();
       await model.dispose();
     },
   };

@@ -12,6 +12,7 @@ import { createLLM } from "./llm/llm.js";
 import { createMemory } from "./memory/memory.js";
 import { createAgent } from "./agent/agent.js";
 import { createDiscordChannel } from "./channels/discord.js";
+import { filesystemTools } from "./tools/filesystem.js";
 import type { Channel } from "./channels/types.js";
 
 function expandPath(path: string): string {
@@ -38,17 +39,26 @@ async function main() {
   });
   console.log("Model loaded!\n");
 
-  // CLI test mode
+  // CLI test mode - also uses agent with tools
   if (cliPrompt) {
+    const memory = await createMemory({
+      dbPath: expandPath(config.memory.path),
+    });
+
+    const agent = createAgent({
+      llm,
+      tools: [...filesystemTools],
+      memory,
+      systemPrompt: "You are Finch, a helpful AI assistant running on the user's local machine. Be concise and friendly. You have access to the filesystem - use it when the user asks about files.",
+    });
+
     console.log("User:", cliPrompt);
     console.log("Assistant:", "");
 
-    const response = await llm.chat([
-      { role: "system", content: "You are Finch, a helpful AI assistant. Be concise." },
-      { role: "user", content: cliPrompt },
-    ]);
+    const response = await agent.chat(cliPrompt, "cli-user");
 
     console.log(response);
+    await memory.dispose();
     await llm.dispose();
     return;
   }
@@ -60,9 +70,9 @@ async function main() {
 
   const agent = createAgent({
     llm,
-    tools: [],
+    tools: [...filesystemTools],
     memory,
-    systemPrompt: "You are Finch, a helpful AI assistant. Be concise and friendly.",
+    systemPrompt: "You are Finch, a helpful AI assistant running on the user's local machine. Be concise and friendly. You have access to the filesystem - use it when the user asks about files.",
   });
 
   const channels: Channel[] = [];
